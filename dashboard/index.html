@@ -1,0 +1,1147 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AlphaESS – PV Live Dashboard</title>
+  <meta name="description" content="Echtzeit-Dashboard für AlphaESS PV-Wechselrichter mit Solarleistung, Batterie, Netz und Hausverbrauch." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Orbitron:wght@700&display=swap" rel="stylesheet" />
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
+  <style>
+    :root {
+      --bg-base:       #0b0f1a;
+      --bg-card:       #111827;
+      --bg-card2:      #1a2236;
+      --border:        rgba(255,255,255,0.07);
+      --text-primary:  #f0f4ff;
+      --text-muted:    #6b7a99;
+      --accent-solar:  #f59e0b;
+      --accent-grid-in:#ef4444;
+      --accent-grid-out:#10b981;
+      --accent-bat:    #8b5cf6;
+      --accent-load:   #3b82f6;
+      --accent-soc:    #06d6a0;
+      --glow-solar:    rgba(245,158,11,0.25);
+      --glow-bat:      rgba(139,92,246,0.25);
+      --glow-load:     rgba(59,130,246,0.25);
+      --glow-grid:     rgba(16,185,129,0.25);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg-base);
+      color: var(--text-primary);
+      font-family: 'Inter', sans-serif;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── HEADER ── */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1.25rem 2rem;
+      background: rgba(17,24,39,0.85);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .logo { display: flex; align-items: center; gap: 0.75rem; }
+    .logo-icon {
+      width: 36px; height: 36px;
+      background: linear-gradient(135deg, var(--accent-solar), var(--accent-bat));
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.2rem;
+    }
+    .logo h1 {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 1.1rem;
+      background: linear-gradient(90deg, var(--accent-solar), #fff);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      letter-spacing: 0.05em;
+    }
+    .header-right { display: flex; align-items: center; gap: 1.5rem; }
+    #connection-status {
+      display: flex; align-items: center; gap: 0.5rem;
+      font-size: 0.8rem; color: var(--text-muted);
+    }
+    #status-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #ef4444; transition: background 0.3s;
+    }
+    #status-dot.connected { background: #10b981; box-shadow: 0 0 8px #10b981; }
+    #last-update { font-size: 0.75rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+
+    /* ── TABS ── */
+    .tab-bar {
+      display: flex;
+      gap: 0;
+      padding: 0 2rem;
+      background: rgba(17,24,39,0.6);
+      border-bottom: 1px solid var(--border);
+    }
+    .tab-btn {
+      padding: 0.85rem 1.5rem;
+      font-size: 0.82rem;
+      font-weight: 500;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      cursor: pointer;
+      border: none;
+      background: transparent;
+      border-bottom: 2px solid transparent;
+      transition: color 0.2s, border-color 0.2s;
+    }
+    .tab-btn:hover { color: var(--text-primary); }
+    .tab-btn.active {
+      color: var(--accent-solar);
+      border-bottom-color: var(--accent-solar);
+    }
+
+    /* ── TIME WINDOW SELECTOR ── */
+    .time-selector {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.6rem 2rem;
+      background: rgba(17,24,39,0.4);
+      border-bottom: 1px solid var(--border);
+    }
+    .time-selector span { font-size: 0.75rem; color: var(--text-muted); margin-right: 0.25rem; }
+    .tw-btn {
+      padding: 0.3rem 0.8rem;
+      font-size: 0.72rem;
+      font-weight: 500;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+    }
+    .tw-btn:hover { background: rgba(255,255,255,0.1); color: var(--text-primary); }
+    .tw-btn.active {
+      background: rgba(245,158,11,0.15);
+      border-color: rgba(245,158,11,0.4);
+      color: var(--accent-solar);
+    }
+
+    /* ── TAB PANELS ── */
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* ── MAIN LAYOUT ── */
+    main { padding: 1.5rem 2rem 3rem; max-width: 1700px; margin: 0 auto; }
+
+    /* ── KPI CARDS ── */
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+      gap: 0.85rem;
+      margin-bottom: 1.25rem;
+    }
+    .kpi-section-label {
+      grid-column: 1 / -1;
+      font-size: 0.68rem;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      padding-bottom: 0.25rem;
+      border-bottom: 1px solid var(--border);
+      margin-top: 0.5rem;
+    }
+
+    .kpi-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 1rem 1.25rem;
+      position: relative;
+      overflow: hidden;
+      transition: transform 0.2s, box-shadow 0.2s;
+      cursor: default;
+    }
+    .kpi-card::before {
+      content: '';
+      position: absolute; inset: 0; border-radius: 14px;
+      opacity: 0; transition: opacity 0.3s;
+    }
+    .kpi-card:hover { transform: translateY(-2px); }
+    .kpi-card:hover::before { opacity: 1; }
+
+    .kpi-card.solar  { border-color: rgba(245,158,11,0.3); }
+    .kpi-card.solar::before  { background: var(--glow-solar); }
+    .kpi-card.solar:hover    { box-shadow: 0 8px 28px var(--glow-solar); }
+    .kpi-card.load   { border-color: rgba(59,130,246,0.3); }
+    .kpi-card.load::before   { background: var(--glow-load); }
+    .kpi-card.load:hover     { box-shadow: 0 8px 28px var(--glow-load); }
+    .kpi-card.grid   { border-color: rgba(16,185,129,0.3); }
+    .kpi-card.grid::before   { background: var(--glow-grid); }
+    .kpi-card.grid:hover     { box-shadow: 0 8px 28px var(--glow-grid); }
+    .kpi-card.battery { border-color: rgba(139,92,246,0.3); }
+    .kpi-card.battery::before { background: var(--glow-bat); }
+    .kpi-card.battery:hover   { box-shadow: 0 8px 28px var(--glow-bat); }
+    .kpi-card.soc    { border-color: rgba(6,214,160,0.3); }
+    .kpi-card.soc:hover      { box-shadow: 0 8px 28px rgba(6,214,160,0.2); }
+    .kpi-card.energy { border-color: rgba(6,214,160,0.2); }
+    .kpi-card.energy:hover   { box-shadow: 0 8px 28px rgba(6,214,160,0.2); }
+    .kpi-card.info   { border-color: rgba(99,102,241,0.3); }
+    .kpi-card.info:hover     { box-shadow: 0 8px 28px rgba(99,102,241,0.2); }
+
+    .kpi-label {
+      font-size: 0.68rem;
+      font-weight: 500;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin-bottom: 0.4rem;
+      display: flex; align-items: center; gap: 0.4rem;
+    }
+    .kpi-value {
+      font-size: 1.9rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      line-height: 1.1;
+      transition: color 0.3s;
+    }
+    .kpi-unit { font-size: 0.82rem; font-weight: 400; color: var(--text-muted); margin-left: 0.2rem; }
+    .kpi-sub  { font-size: 0.72rem; color: var(--text-muted); margin-top: 0.35rem; }
+
+    /* SoC Gauge */
+    .soc-gauge-wrap { display: flex; align-items: center; gap: 0.85rem; }
+    .soc-ring { width: 58px; height: 58px; flex-shrink: 0; }
+    .soc-ring svg { width: 100%; height: 100%; }
+    .soc-ring circle { fill: none; stroke-width: 6; stroke-linecap: round; }
+    .soc-bg { stroke: rgba(255,255,255,0.08); }
+    .soc-fg {
+      stroke: var(--accent-soc);
+      stroke-dasharray: 163;
+      stroke-dashoffset: 163;
+      transition: stroke-dashoffset 1s ease, stroke 0.5s;
+      transform: rotate(-90deg);
+      transform-origin: center;
+    }
+
+    /* ── FLOW BAR ── */
+    .flow-bar {
+      display: flex; gap: 0.5rem;
+      margin-bottom: 1.25rem;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 0.85rem 1.25rem;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .flow-item {
+      display: flex; align-items: center; gap: 0.4rem;
+      font-size: 0.76rem; color: var(--text-muted);
+      padding: 0.3rem 0.7rem;
+      border-radius: 8px;
+      background: rgba(255,255,255,0.04);
+    }
+    .flow-dot { width: 8px; height: 8px; border-radius: 50%; }
+    .flow-arrow { color: var(--text-muted); font-size: 1rem; flex-shrink: 0; }
+
+    /* ── CHARTS ── */
+    .charts-grid {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 1rem;
+    }
+    @media (max-width: 1100px) { .charts-grid { grid-template-columns: 1fr; } }
+
+    .chart-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 1.1rem 1.25rem;
+    }
+    .chart-card-title {
+      font-size: 0.72rem; font-weight: 500; letter-spacing: 0.08em;
+      text-transform: uppercase; color: var(--text-muted); margin-bottom: 0.6rem;
+    }
+    .plotly-chart      { width: 100%; height: 270px; }
+    .plotly-chart-tall { width: 100%; height: 560px; }
+
+    /* ── REGISTER TABLE (Tab 2) ── */
+    .register-table-wrap {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+    }
+    .reg-table-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid var(--border);
+      flex-wrap: wrap;
+    }
+    .reg-search {
+      flex: 1;
+      min-width: 200px;
+      padding: 0.5rem 0.9rem;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text-primary);
+      font-size: 0.82rem;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .reg-search:focus { border-color: rgba(245,158,11,0.5); }
+    .reg-search::placeholder { color: var(--text-muted); }
+    .reg-count { font-size: 0.75rem; color: var(--text-muted); white-space: nowrap; }
+
+    .reg-live-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.35rem 0.8rem;
+      background: rgba(6,214,160,0.1);
+      border: 1px solid rgba(6,214,160,0.25);
+      border-radius: 20px;
+      font-size: 0.72rem;
+      color: var(--accent-soc);
+      white-space: nowrap;
+    }
+    .reg-live-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--accent-soc);
+      box-shadow: 0 0 6px var(--accent-soc);
+      animation: pulse-dot 1.5s infinite;
+    }
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.35; transform: scale(0.85); }
+    }
+    .reg-live-time {
+      color: var(--text-muted);
+      font-variant-numeric: tabular-nums;
+      font-size: 0.7rem;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.8rem;
+    }
+    thead th {
+      padding: 0.75rem 1rem;
+      text-align: left;
+      font-size: 0.68rem;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      background: rgba(255,255,255,0.03);
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      user-select: none;
+    }
+    thead th:hover { color: var(--text-primary); }
+    thead th .sort-arrow { margin-left: 4px; opacity: 0.4; }
+    thead th.sort-asc .sort-arrow::after  { content: ' ▲'; opacity: 1; }
+    thead th.sort-desc .sort-arrow::after { content: ' ▼'; opacity: 1; }
+
+    tbody tr {
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+      transition: background 0.15s;
+    }
+    tbody tr:hover { background: rgba(255,255,255,0.04); }
+    tbody td { padding: 0.65rem 1rem; vertical-align: top; }
+
+    .td-addr  { color: var(--accent-solar); font-variant-numeric: tabular-nums; font-family: monospace; white-space: nowrap; }
+    .td-name  { font-weight: 500; color: var(--text-primary); }
+    .td-desc  { color: var(--text-muted); font-size: 0.75rem; }
+    .td-unit  { color: var(--accent-soc); font-size: 0.75rem; white-space: nowrap; }
+    .td-val   { font-variant-numeric: tabular-nums; font-family: monospace; color: #a5b4fc; white-space: nowrap; }
+    .td-live  {
+      font-variant-numeric: tabular-nums;
+      font-family: monospace;
+      font-weight: 600;
+      color: #38bdf8;
+      white-space: nowrap;
+      transition: background-color 0.4s ease, color 0.4s ease;
+      border-radius: 4px;
+      padding: 0.1rem 0.3rem;
+    }
+    .td-live.updated {
+      background-color: rgba(6, 214, 160, 0.28);
+      color: #ffffff;
+    }
+    .td-type  { color: var(--text-muted); font-size: 0.72rem; font-family: monospace; white-space: nowrap; }
+
+    .badge {
+      display: inline-block;
+      padding: 0.15rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.68rem;
+      font-weight: 500;
+    }
+    .badge-value  { background: rgba(59,130,246,0.2);  color: #93c5fd; }
+    .badge-state  { background: rgba(245,158,11,0.2);  color: #fcd34d; }
+    .badge-switch { background: rgba(16,185,129,0.2);  color: #6ee7b7; }
+
+    /* Animations */
+    @keyframes value-flash { 0% { opacity: 0.4; } 100% { opacity: 1; } }
+    .value-updated { animation: value-flash 0.4s ease; }
+
+    /* ── FOOTER ── */
+    footer {
+      text-align: center; padding: 1rem;
+      color: var(--text-muted); font-size: 0.72rem;
+      border-top: 1px solid var(--border); margin-top: 2rem;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon">☀️</div>
+    <h1>AlphaESS · Live Dashboard</h1>
+  </div>
+  <div class="header-right">
+    <div id="connection-status">
+      <div id="status-dot"></div>
+      <span id="status-text">Verbinde…</span>
+    </div>
+    <div id="last-update">–</div>
+  </div>
+</header>
+
+<!-- Tab Navigation -->
+<div class="tab-bar">
+  <button class="tab-btn active" onclick="switchTab('live')">📈 Live Dashboard</button>
+  <button class="tab-btn" onclick="switchTab('registers')">🗃️ Register</button>
+</div>
+
+<!-- Time Window Selector (nur im Live-Tab sichtbar) -->
+<div class="time-selector" id="time-selector">
+  <span>Zeitfenster:</span>
+  <button class="tw-btn" onclick="setTimeWindow(5)"    data-tw="5">5 min</button>
+  <button class="tw-btn" onclick="setTimeWindow(10)"   data-tw="10">10 min</button>
+  <button class="tw-btn" onclick="setTimeWindow(15)"   data-tw="15">15 min</button>
+  <button class="tw-btn active" onclick="setTimeWindow(60)"  data-tw="60">60 min</button>
+  <button class="tw-btn" onclick="setTimeWindow(720)"  data-tw="720">12 h</button>
+  <button class="tw-btn" onclick="setTimeWindow(1440)" data-tw="1440">24 h</button>
+</div>
+
+<!-- ══════════════════════════════════════════════════
+     TAB 1: LIVE DASHBOARD
+═══════════════════════════════════════════════════ -->
+<div class="tab-panel active" id="tab-live">
+<main>
+
+  <!-- KPI Grid: Energie-Fluss -->
+  <div class="kpi-grid">
+    <div class="kpi-section-label">⚡ Energie-Fluss · Aktuell</div>
+
+    <div class="kpi-card solar" id="card-solar" title="Aktuelle PV-Leistung gesamt">
+      <div class="kpi-label"><span>🌞</span> Solar gesamt</div>
+      <div class="kpi-value" id="val-solar">–<span class="kpi-unit">W</span></div>
+      <div class="kpi-sub" id="sub-solar">PV1 + PV2 + PV3</div>
+    </div>
+
+    <div class="kpi-card solar" title="PV1-Leistung">
+      <div class="kpi-label"><span>☀️</span> PV1</div>
+      <div class="kpi-value" id="val-pv1">–<span class="kpi-unit">W</span></div>
+      <div class="kpi-sub">Strang 1</div>
+    </div>
+
+    <div class="kpi-card solar" title="PV2-Leistung">
+      <div class="kpi-label"><span>☀️</span> PV2</div>
+      <div class="kpi-value" id="val-pv2">–<span class="kpi-unit">W</span></div>
+      <div class="kpi-sub">Strang 2</div>
+    </div>
+
+    <div class="kpi-card solar" title="PV3-Leistung">
+      <div class="kpi-label"><span>☀️</span> PV3</div>
+      <div class="kpi-value" id="val-pv3">–<span class="kpi-unit">W</span></div>
+      <div class="kpi-sub">Strang 3</div>
+    </div>
+
+    <div class="kpi-card load" id="card-load" title="Geschätzter Hausverbrauch">
+      <div class="kpi-label"><span>🏠</span> Hausverbrauch</div>
+      <div class="kpi-value" id="val-load">–<span class="kpi-unit">W</span></div>
+      <div class="kpi-sub">Aktueller Verbrauch</div>
+    </div>
+
+    <div class="kpi-card grid" id="card-grid" title="Netz: positiv = Bezug, negativ = Einspeisung">
+      <div class="kpi-label"><span>⚡</span> Netz</div>
+      <div class="kpi-value" id="val-grid">–<span class="kpi-unit">W</span></div>
+      <div class="kpi-sub" id="sub-grid">Netzleistung</div>
+    </div>
+
+  </div>
+
+  <!-- KPI Grid: Batterie -->
+  <div class="kpi-grid">
+    <div class="kpi-section-label">🔋 Batterie</div>
+
+    <div class="kpi-card battery" title="Batterieleistung: positiv = Entladen, negativ = Laden">
+      <div class="kpi-label"><span>🔋</span> Batterie-Power</div>
+      <div class="kpi-value" id="val-bat">–<span class="kpi-unit">W</span></div>
+      <div class="kpi-sub" id="sub-bat">Lade-/Entladeleistung</div>
+    </div>
+
+    <div class="kpi-card soc" title="Aktueller Batterieladestand">
+      <div class="kpi-label"><span>📊</span> Ladestand (SoC)</div>
+      <div class="soc-gauge-wrap">
+        <div class="soc-ring">
+          <svg viewBox="0 0 60 60">
+            <circle class="soc-bg" cx="30" cy="30" r="26"/>
+            <circle class="soc-fg" id="soc-ring-fg" cx="30" cy="30" r="26"/>
+          </svg>
+        </div>
+        <div>
+          <div class="kpi-value" id="val-soc">–<span class="kpi-unit">%</span></div>
+          <div class="kpi-sub" id="sub-soc">Batterie-SoC</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="kpi-card energy" title="Aktuell gespeicherte Energie">
+      <div class="kpi-label"><span>⚡</span> Energie im Speicher</div>
+      <div class="kpi-value" id="val-energy">–<span class="kpi-unit">kWh</span></div>
+      <div class="kpi-sub" id="sub-energy">von – kWh</div>
+    </div>
+
+    <div class="kpi-card info" title="Batterie-Nennkapazität">
+      <div class="kpi-label"><span>🗄️</span> Kapazität</div>
+      <div class="kpi-value" id="val-bat-cap">–<span class="kpi-unit">kWh</span></div>
+      <div class="kpi-sub">Nennkapazität</div>
+    </div>
+
+    <div class="kpi-card info" title="Batterie State of Health">
+      <div class="kpi-label"><span>❤️</span> SoH</div>
+      <div class="kpi-value" id="val-bat-soh">–<span class="kpi-unit">%</span></div>
+      <div class="kpi-sub">State of Health</div>
+    </div>
+
+    <div class="kpi-card info" title="Maximaler SOC-Grenzwert">
+      <div class="kpi-label"><span>🔝</span> Max SOC</div>
+      <div class="kpi-value" id="val-max-soc">–<span class="kpi-unit">%</span></div>
+      <div class="kpi-sub">Ladegrenze</div>
+    </div>
+  </div>
+
+  <!-- KPI Grid: Energie-Zähler -->
+  <div class="kpi-grid">
+    <div class="kpi-section-label">📦 Energie-Zähler (Gesamt)</div>
+
+    <div class="kpi-card solar" title="Gesamte erzeugte PV-Energie">
+      <div class="kpi-label"><span>🌞</span> PV-Gesamtenergie</div>
+      <div class="kpi-value" id="val-total-pv">–<span class="kpi-unit">kWh</span></div>
+      <div class="kpi-sub">Total PV Energy</div>
+    </div>
+
+    <div class="kpi-card solar" title="PV Inverter Energie">
+      <div class="kpi-label"><span>🔌</span> PV Inverter Energie</div>
+      <div class="kpi-value" id="val-pv-inv">–<span class="kpi-unit">kWh</span></div>
+      <div class="kpi-sub">PV Inverter Energy</div>
+    </div>
+
+    <div class="kpi-card battery" title="Gesamte Batterieladeenergie">
+      <div class="kpi-label"><span>⬆️</span> Batterie geladen</div>
+      <div class="kpi-value" id="val-bat-chg">–<span class="kpi-unit">kWh</span></div>
+      <div class="kpi-sub">Gesamt geladen</div>
+    </div>
+
+    <div class="kpi-card battery" title="Gesamte Batterieentladeenergie">
+      <div class="kpi-label"><span>⬇️</span> Batterie entladen</div>
+      <div class="kpi-value" id="val-bat-dchg">–<span class="kpi-unit">kWh</span></div>
+      <div class="kpi-sub">Gesamt entladen</div>
+    </div>
+
+    <div class="kpi-card grid" title="Batterieladung aus dem Netz">
+      <div class="kpi-label"><span>🔌</span> Laden aus Netz</div>
+      <div class="kpi-value" id="val-bat-grid">–<span class="kpi-unit">kWh</span></div>
+      <div class="kpi-sub">Netzbezug → Batterie</div>
+    </div>
+  </div>
+
+  <!-- Energiefluss -->
+  <div class="flow-bar" id="flow-bar">
+    <div class="flow-item" id="flow-solar"><div class="flow-dot" style="background:var(--accent-solar)"></div>Solar: – W</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-item" id="flow-load"><div class="flow-dot" style="background:var(--accent-load)"></div>Haus: – W</div>
+    <span class="flow-arrow">|</span>
+    <div class="flow-item" id="flow-grid"><div class="flow-dot" style="background:var(--accent-grid-out)"></div>Netz: – W</div>
+    <span class="flow-arrow">|</span>
+    <div class="flow-item" id="flow-bat"><div class="flow-dot" style="background:var(--accent-bat)"></div>Batterie: – W</div>
+    <span class="flow-arrow">|</span>
+    <div class="flow-item" id="flow-pv1"><div class="flow-dot" style="background:#06b6d4"></div>PV1: – W</div>
+    <div class="flow-item" id="flow-pv2"><div class="flow-dot" style="background:#f59e0b"></div>PV2: – W</div>
+    <div class="flow-item" id="flow-pv3"><div class="flow-dot" style="background:#ec4899"></div>PV3: – W</div>
+  </div>
+
+  <!-- Charts -->
+  <div class="charts-grid">
+    <div>
+      <div class="chart-card" style="margin-bottom:1rem">
+        <div class="chart-card-title">📈 Leistungsverlauf</div>
+        <div id="chart-power" class="plotly-chart"></div>
+      </div>
+      <div class="chart-card" style="margin-bottom:1rem">
+        <div class="chart-card-title">☀️ PV-Leistung pro Strang</div>
+        <div id="chart-pv" class="plotly-chart"></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-card-title">🔋 Batterieladestand (SoC)</div>
+        <div id="chart-soc" class="plotly-chart"></div>
+      </div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-card-title">⚡ Energie-Balance</div>
+      <div id="chart-sankey" class="plotly-chart-tall"></div>
+    </div>
+  </div>
+
+</main>
+</div>
+
+<!-- ══════════════════════════════════════════════════
+     TAB 2: REGISTER
+═══════════════════════════════════════════════════ -->
+<div class="tab-panel" id="tab-registers">
+<main>
+  <div class="register-table-wrap">
+    <div class="reg-table-toolbar">
+      <input class="reg-search" id="reg-search" type="search" placeholder="Suche nach Name, Beschreibung, Adresse…" oninput="filterTable()" />
+      <div class="reg-live-badge" title="Automatische Live-Aktualisierung alle 5 Sekunden">
+        <span class="reg-live-dot"></span>
+        <span>Live (alle 5s)</span>
+        <span class="reg-live-time" id="reg-live-time">–</span>
+      </div>
+      <span class="reg-count" id="reg-count">Lade…</span>
+    </div>
+    <div style="overflow-x:auto">
+      <table id="reg-table">
+        <thead>
+          <tr>
+            <th onclick="sortTable(0)" title="Modbus-Registeradresse">Adresse<span class="sort-arrow"></span></th>
+            <th onclick="sortTable(1)">Name<span class="sort-arrow"></span></th>
+            <th onclick="sortTable(2)">Beschreibung<span class="sort-arrow"></span></th>
+            <th onclick="sortTable(3)">Einheit<span class="sort-arrow"></span></th>
+            <th onclick="sortTable(4)">Typ<span class="sort-arrow"></span></th>
+            <th onclick="sortTable(5)">Faktor<span class="sort-arrow"></span></th>
+            <th onclick="sortTable(6)">Rolle<span class="sort-arrow"></span></th>
+            <th onclick="sortTable(7)" title="Aktueller Rohwert (alle 5s aktualisiert)">Rohwert<span class="sort-arrow"></span></th>
+            <th onclick="sortTable(8)" title="Aktueller Wert skaliert (alle 5s aktualisiert)">Aktueller Wert (Live)<span class="sort-arrow"></span></th>
+          </tr>
+        </thead>
+        <tbody id="reg-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</main>
+</div>
+
+<footer>AlphaESS Live Dashboard &nbsp;·&nbsp; 192.168.178.29 &nbsp;·&nbsp; Daten via Modbus TCP</footer>
+
+<script>
+// ═══════════════════════════════════════════════════════
+//  Tab & Time Window
+// ═══════════════════════════════════════════════════════
+
+let currentTab = 'live';
+
+function switchTab(tab) {
+  currentTab = tab;
+  document.querySelectorAll('.tab-btn').forEach((b, i) => {
+    b.classList.toggle('active', ['live','registers'][i] === tab);
+  });
+  document.getElementById('tab-live').classList.toggle('active', tab === 'live');
+  document.getElementById('tab-registers').classList.toggle('active', tab === 'registers');
+  document.getElementById('time-selector').style.display = tab === 'live' ? '' : 'none';
+
+  // Dem Server mitteilen, welcher Tab aktiv ist (damit das 5s-Registerpolling nur bei Bedarf läuft)
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'view_tab', tab: tab }));
+  }
+
+  if (tab === 'registers' && !registersLoaded) loadRegisters();
+}
+
+// Time window in minutes
+let timeWindowMin = 60;
+const MAX_POINTS = 17280; // 24h × 12 Punkte/min (bei 5s Takt)
+
+function setTimeWindow(min) {
+  timeWindowMin = min;
+  document.querySelectorAll('.tw-btn').forEach(b => {
+    b.classList.toggle('active', +b.dataset.tw === min);
+  });
+  redrawCharts();
+}
+
+function getWindowedData() {
+  const pointsPerMin = 12; // 60s / 5s = 12 Datenpunkte pro Minute
+  const pointsNeeded = Math.round(timeWindowMin * pointsPerMin);
+  const start = Math.max(0, times.length - pointsNeeded);
+  return {
+    t:    times.slice(start),
+    pv:   pvArr.slice(start),
+    pv1:  pv1Arr.slice(start),
+    pv2:  pv2Arr.slice(start),
+    pv3:  pv3Arr.slice(start),
+    load: loadArr.slice(start),
+    grid: gridArr.slice(start),
+    bat:  batArr.slice(start),
+    soc:  socArr.slice(start),
+  };
+}
+
+// ═══════════════════════════════════════════════════════
+//  Plotly Chart Setup
+// ═══════════════════════════════════════════════════════
+
+const PLOT_LAYOUT_BASE = {
+  paper_bgcolor: 'transparent',
+  plot_bgcolor:  'transparent',
+  font: { color: '#6b7a99', family: 'Inter, sans-serif', size: 11 },
+  margin: { l: 50, r: 10, t: 10, b: 40 },
+  xaxis: {
+    gridcolor: 'rgba(255,255,255,0.05)',
+    linecolor:  'rgba(255,255,255,0.1)',
+    tickcolor:  'rgba(255,255,255,0.1)',
+  },
+  yaxis: {
+    gridcolor: 'rgba(255,255,255,0.05)',
+    linecolor:  'rgba(255,255,255,0.1)',
+    tickcolor:  'rgba(255,255,255,0.1)',
+    ticksuffix: ' W',
+  },
+  legend: {
+    orientation: 'h', x: 0, y: 1.08,
+    font: { size: 10 }, bgcolor: 'transparent',
+  },
+  hovermode: 'x unified',
+  hoverlabel: {
+    bgcolor: '#1a2236', bordercolor: 'rgba(255,255,255,0.15)',
+    font: { color: '#f0f4ff', size: 11 },
+  },
+};
+
+const powerTraceDefs = [
+  { name: '🌞 Solar',       color: '#f59e0b', fill: 'rgba(245,158,11,0.1)' },
+  { name: '🏠 Hausverbrauch', color: '#3b82f6', fill: 'rgba(59,130,246,0.08)' },
+  { name: '⚡ Netz',         color: '#10b981', fill: null },
+  { name: '🔋 Batterie',     color: '#8b5cf6', fill: null },
+];
+
+function makeTrace(def, xs, ys) {
+  return {
+    name: def.name, x: xs, y: ys, mode: 'lines',
+    line: { color: def.color, width: 2.2, shape: 'spline', smoothing: 0.8 },
+    ...(def.fill ? { fill: 'tozeroy', fillcolor: def.fill } : {}),
+  };
+}
+
+Plotly.newPlot('chart-power',
+  powerTraceDefs.map(d => makeTrace(d, [], [])),
+  { ...PLOT_LAYOUT_BASE },
+  { responsive: true, displayModeBar: false }
+);
+
+// PV Strang Chart
+Plotly.newPlot('chart-pv', [
+  { name: 'PV1', x:[], y:[], mode:'lines', line:{ color:'#06b6d4', width:2, shape:'spline', smoothing:0.8 }, fill:'tozeroy', fillcolor:'rgba(6,182,212,0.12)' },
+  { name: 'PV2', x:[], y:[], mode:'lines', line:{ color:'#f59e0b', width:2, shape:'spline', smoothing:0.8 }, fill:'tozeroy', fillcolor:'rgba(245,158,11,0.08)' },
+  { name: 'PV3', x:[], y:[], mode:'lines', line:{ color:'#ec4899', width:2, shape:'spline', smoothing:0.8 }, fill:'tozeroy', fillcolor:'rgba(236,72,153,0.08)' },
+], { ...PLOT_LAYOUT_BASE }, { responsive: true, displayModeBar: false });
+
+// SoC Chart
+Plotly.newPlot('chart-soc', [{
+  name: 'SoC', x:[], y:[], mode:'lines',
+  line:{ color:'#06d6a0', width:2.2, shape:'spline', smoothing:0.8 },
+  fill:'tozeroy', fillcolor:'rgba(6,214,160,0.12)',
+}], {
+  ...PLOT_LAYOUT_BASE,
+  yaxis: { ...PLOT_LAYOUT_BASE.yaxis, ticksuffix:' %', range:[0,100] },
+  showlegend: false,
+}, { responsive: true, displayModeBar: false });
+
+function redrawCharts() {
+  const d = getWindowedData();
+  Plotly.react('chart-power', [
+    makeTrace(powerTraceDefs[0], d.t, d.pv),
+    makeTrace(powerTraceDefs[1], d.t, d.load),
+    makeTrace(powerTraceDefs[2], d.t, d.grid),
+    makeTrace(powerTraceDefs[3], d.t, d.bat),
+  ], PLOT_LAYOUT_BASE, { displayModeBar: false });
+
+  Plotly.react('chart-pv', [
+    { name:'PV1', x:d.t, y:d.pv1, mode:'lines', line:{color:'#06b6d4',width:2,shape:'spline',smoothing:0.8}, fill:'tozeroy', fillcolor:'rgba(6,182,212,0.12)' },
+    { name:'PV2', x:d.t, y:d.pv2, mode:'lines', line:{color:'#f59e0b',width:2,shape:'spline',smoothing:0.8}, fill:'tozeroy', fillcolor:'rgba(245,158,11,0.08)' },
+    { name:'PV3', x:d.t, y:d.pv3, mode:'lines', line:{color:'#ec4899',width:2,shape:'spline',smoothing:0.8}, fill:'tozeroy', fillcolor:'rgba(236,72,153,0.08)' },
+  ], PLOT_LAYOUT_BASE, { displayModeBar: false });
+
+  Plotly.react('chart-soc', [{ name:'SoC', x:d.t, y:d.soc, mode:'lines',
+    line:{color:'#06d6a0',width:2.2,shape:'spline',smoothing:0.8},
+    fill:'tozeroy', fillcolor:'rgba(6,214,160,0.12)',
+  }], { ...PLOT_LAYOUT_BASE, yaxis:{...PLOT_LAYOUT_BASE.yaxis,ticksuffix:' %',range:[0,100]}, showlegend:false },
+  { displayModeBar: false });
+}
+
+// Sankey
+function updateSankeyChart(data) {
+  const pv = data.pv_power, load = data.house_load,
+        bat = data.bat_power, grid = data.grid_power;
+
+  const labels   = ['Solar ☀️','Netz ⚡','Batterie 🔋','Hausverbrauch 🏠','Einspeisung ↑','Laden 🔋'];
+  const src=[], tgt=[], vals=[], cols=[];
+
+  if (pv > 0 && load > 0)  { src.push(0); tgt.push(3); vals.push(Math.min(pv,load)); cols.push('rgba(245,158,11,0.6)'); }
+  if (pv > 0 && grid < 0)  { src.push(0); tgt.push(4); vals.push(Math.abs(grid));    cols.push('rgba(16,185,129,0.6)'); }
+  if (pv > 0 && bat < 0)   { src.push(0); tgt.push(5); vals.push(Math.abs(bat));     cols.push('rgba(245,158,11,0.4)'); }
+  if (grid > 0)             { src.push(1); tgt.push(3); vals.push(grid);              cols.push('rgba(239,68,68,0.6)'); }
+  if (bat > 0)              { src.push(2); tgt.push(3); vals.push(bat);               cols.push('rgba(139,92,246,0.6)'); }
+
+  Plotly.react('chart-sankey', [{
+    type: 'sankey', orientation: 'h', arrangement: 'snap',
+    node: {
+      label: labels,
+      color: ['#f59e0b','#10b981','#8b5cf6','#3b82f6','#10b981','#8b5cf6'],
+      pad: 20, thickness: 20,
+      line: { color: 'transparent', width: 0 },
+    },
+    link: {
+      source: src, target: tgt,
+      value:  vals.length ? vals : [1],
+      color:  cols.length ? cols : ['rgba(0,0,0,0)'],
+    },
+  }], {
+    paper_bgcolor: 'transparent', plot_bgcolor: 'transparent',
+    font: { color: '#9ca3af', family: 'Inter, sans-serif', size: 11 },
+    margin: { l: 15, r: 15, t: 20, b: 15 },
+  }, { displayModeBar: false });
+}
+
+// ═══════════════════════════════════════════════════════
+//  State & Ringbuffer
+// ═══════════════════════════════════════════════════════
+
+let times=[], pvArr=[], pv1Arr=[], pv2Arr=[], pv3Arr=[], loadArr=[], gridArr=[], batArr=[], socArr=[];
+
+function trimBuffers() {
+  while (times.length > MAX_POINTS) {
+    times.shift(); pvArr.shift(); pv1Arr.shift(); pv2Arr.shift();
+    pv3Arr.shift(); loadArr.shift(); gridArr.shift(); batArr.shift(); socArr.shift();
+  }
+}
+
+function flashUpdate(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.remove('value-updated');
+  void el.offsetWidth;
+  el.classList.add('value-updated');
+}
+
+function fmt(v, dec=0) {
+  if (v === null || v === undefined) return '–';
+  return v.toLocaleString('de-DE', { maximumFractionDigits: dec });
+}
+function fmtUnit(v, unit, dec=0) {
+  return `${fmt(v, dec)}<span class="kpi-unit">${unit}</span>`;
+}
+
+function updateKPIs(d) {
+  // Solar
+  document.getElementById('val-solar').innerHTML = fmtUnit(d.pv_power, 'W');
+  document.getElementById('sub-solar').textContent = `PV1: ${fmt(d.pv1_power)} W | PV2: ${fmt(d.pv2_power)} W | PV3: ${fmt(d.pv3_power)} W`;
+  document.getElementById('val-pv1').innerHTML = fmtUnit(d.pv1_power, 'W');
+  document.getElementById('val-pv2').innerHTML = fmtUnit(d.pv2_power, 'W');
+  document.getElementById('val-pv3').innerHTML = fmtUnit(d.pv3_power, 'W');
+  flashUpdate('val-solar');
+
+  // Haus
+  document.getElementById('val-load').innerHTML = fmtUnit(d.house_load, 'W');
+
+  // Netz
+  const ge = document.getElementById('val-grid');
+  ge.style.color = d.grid_power > 0 ? '#ef4444' : '#10b981';
+  ge.innerHTML = fmtUnit(d.grid_power, 'W');
+  document.getElementById('sub-grid').textContent = d.grid_power > 0 ? '⬆ Netzbezug' : '⬇ Einspeisung';
+
+  // Batterie
+  const be = document.getElementById('val-bat');
+  be.style.color = d.bat_power > 0 ? '#8b5cf6' : '#06d6a0';
+  be.innerHTML = fmtUnit(d.bat_power, 'W');
+  document.getElementById('sub-bat').textContent = d.bat_power > 0 ? '🔴 Entladen' : d.bat_power < 0 ? '🟢 Laden' : 'Standby';
+
+  // SoC
+  const soc = d.bat_soc;
+  document.getElementById('val-soc').innerHTML = fmtUnit(soc, '%', 1);
+  const offset = 163 - (soc / 100) * 163;
+  const ring = document.getElementById('soc-ring-fg');
+  ring.style.strokeDashoffset = offset;
+  ring.style.stroke = soc > 60 ? '#06d6a0' : soc > 25 ? '#f59e0b' : '#ef4444';
+
+  // Energie im Speicher
+  document.getElementById('val-energy').innerHTML = fmtUnit(d.energy_kwh, 'kWh', 2);
+  const cap = d.bat_capacity || d.total_capacity_kwh;
+  document.getElementById('sub-soc').textContent    = `${fmt(d.energy_kwh, 2)} kWh im Speicher`;
+  document.getElementById('sub-energy').textContent = `von ${fmt(cap, 2)} kWh`;
+
+  // Batterie-Details
+  document.getElementById('val-bat-cap').innerHTML  = fmtUnit(d.bat_capacity,  'kWh', 2);
+  document.getElementById('val-bat-soh').innerHTML  = fmtUnit(d.bat_soh,       '%',   1);
+  document.getElementById('val-max-soc').innerHTML  = fmtUnit(d.max_soc,       '%');
+
+  // Energie-Zähler
+  document.getElementById('val-total-pv').innerHTML  = fmtUnit(d.total_pv_kwh,  'kWh', 1);
+  document.getElementById('val-pv-inv').innerHTML    = fmtUnit(d.pv_inv_kwh,    'kWh', 1);
+  document.getElementById('val-bat-chg').innerHTML   = fmtUnit(d.bat_chg_kwh,   'kWh', 1);
+  document.getElementById('val-bat-dchg').innerHTML  = fmtUnit(d.bat_dchg_kwh,  'kWh', 1);
+  document.getElementById('val-bat-grid').innerHTML  = fmtUnit(d.bat_grid_kwh,  'kWh', 1);
+
+  // Flow Bar
+  document.getElementById('flow-solar').innerHTML = `<div class="flow-dot" style="background:var(--accent-solar)"></div>Solar: ${fmt(d.pv_power)} W`;
+  document.getElementById('flow-load').innerHTML  = `<div class="flow-dot" style="background:var(--accent-load)"></div>Haus: ${fmt(d.house_load)} W`;
+  document.getElementById('flow-grid').innerHTML  = `<div class="flow-dot" style="background:${d.grid_power > 0 ? 'var(--accent-grid-in)' : 'var(--accent-grid-out)'}"></div>Netz: ${fmt(d.grid_power)} W`;
+  document.getElementById('flow-bat').innerHTML   = `<div class="flow-dot" style="background:var(--accent-bat)"></div>Batterie: ${fmt(d.bat_power)} W`;
+  document.getElementById('flow-pv1').innerHTML   = `<div class="flow-dot" style="background:#06b6d4"></div>PV1: ${fmt(d.pv1_power)} W`;
+  document.getElementById('flow-pv2').innerHTML   = `<div class="flow-dot" style="background:#f59e0b"></div>PV2: ${fmt(d.pv2_power)} W`;
+  document.getElementById('flow-pv3').innerHTML   = `<div class="flow-dot" style="background:#ec4899"></div>PV3: ${fmt(d.pv3_power)} W`;
+
+  document.getElementById('last-update').textContent = `Zuletzt: ${d.time}`;
+}
+
+function appendPoint(d) {
+  times.push(d.time);
+  pvArr.push(d.pv_power);   pv1Arr.push(d.pv1_power ?? 0);
+  pv2Arr.push(d.pv2_power ?? 0); pv3Arr.push(d.pv3_power ?? 0);
+  loadArr.push(d.house_load); gridArr.push(d.grid_power);
+  batArr.push(d.bat_power);   socArr.push(d.bat_soc);
+  trimBuffers();
+  redrawCharts();
+  updateSankeyChart(d);
+}
+
+function loadHistory(history) {
+  history.forEach(d => {
+    times.push(d.time);
+    pvArr.push(d.pv_power);   pv1Arr.push(d.pv1_power ?? 0);
+    pv2Arr.push(d.pv2_power ?? 0); pv3Arr.push(d.pv3_power ?? 0);
+    loadArr.push(d.house_load); gridArr.push(d.grid_power);
+    batArr.push(d.bat_power);   socArr.push(d.bat_soc);
+  });
+  trimBuffers();
+  if (history.length > 0) {
+    updateKPIs(history[history.length - 1]);
+    redrawCharts();
+    updateSankeyChart(history[history.length - 1]);
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+//  Register Table (Tab 2)
+// ═══════════════════════════════════════════════════════
+
+let registersLoaded = false;
+let allRows = [];
+let sortCol = 0, sortDir = 1;
+
+async function loadRegisters() {
+  registersLoaded = true;
+  const res = await fetch('/api/registers');
+  if (!res.ok) {
+    document.getElementById('reg-tbody').innerHTML = '<tr><td colspan="9" style="color:#ef4444;padding:1rem">Fehler: register.json nicht gefunden – bitte check_registers.py ausführen.</td></tr>';
+    return;
+  }
+  const json = await res.json();
+  const regs = json.available_registers || {};
+
+  allRows = Object.values(regs).map(r => ({
+    address:     r.address,
+    name:        r.name       || '',
+    description: r.description|| '',
+    unit:        r.unit       || '',
+    type:        r.type       || '',
+    factor:      r.factor     || '1',
+    role:        r.role       || '',
+    raw:         r.raw_value,
+    scaled:      r.scaled_value,
+  }));
+
+  document.getElementById('reg-count').textContent = `${allRows.length} Register verfügbar`;
+  renderTable(allRows);
+
+  // Sofort neueste Live-Werte abrufen falls schon vorhanden
+  try {
+    const liveRes = await fetch('/api/registers/live');
+    if (liveRes.ok) {
+      const liveJson = await liveRes.json();
+      if (liveJson.values && Object.keys(liveJson.values).length > 0) {
+        updateLiveRegisters(liveJson.values, liveJson.timestamp);
+      }
+    }
+  } catch (e) {}
+}
+
+function renderTable(rows) {
+  const tbody = document.getElementById('reg-tbody');
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="9" style="color:var(--text-muted);padding:1rem;text-align:center">Keine Einträge gefunden.</td></tr>';
+    return;
+  }
+
+  const roleBadge = r => {
+    const cls = r === 'state' ? 'badge-state' : r === 'switch' ? 'badge-switch' : 'badge-value';
+    return r ? `<span class="badge ${cls}">${r}</span>` : '';
+  };
+
+  const fmtVal = (v, name) => {
+    if (v === null || v === undefined) return '–';
+    if (typeof v === 'string') return v || '–';
+    if (typeof v === 'number') {
+      if (Number.isInteger(v)) {
+        // BMU Software-Version formatieren (145 -> V1.45)
+        if (name === 'BMU_Software_Version' && v > 0) {
+          return `V${(v / 100).toFixed(2)} (${v})`;
+        }
+        return String(v);
+      }
+      return v.toLocaleString('de-DE', { maximumFractionDigits: 4 });
+    }
+    return String(v);
+  };
+
+  tbody.innerHTML = rows.map(r => `
+    <tr>
+      <td class="td-addr">${r.address}</td>
+      <td class="td-name">${r.name}</td>
+      <td class="td-desc">${r.description}</td>
+      <td class="td-unit">${r.unit || '–'}</td>
+      <td class="td-type">${r.type}</td>
+      <td class="td-type">${r.factor}</td>
+      <td>${roleBadge(r.role)}</td>
+      <td class="td-val" id="raw-val-${r.address}">${fmtVal(r.raw, r.name)}</td>
+      <td class="td-live" id="live-val-${r.address}">${fmtVal(r.scaled, r.name)}</td>
+    </tr>`).join('');
+
+  // Update count
+  document.getElementById('reg-count').textContent =
+    `${rows.length} von ${allRows.length} Registern`;
+}
+
+function updateLiveRegisters(values, timestamp) {
+  if (timestamp) {
+    const el = document.getElementById('reg-live-time');
+    if (el) el.textContent = timestamp;
+  }
+  if (!values) return;
+
+  for (const [addrStr, data] of Object.entries(values)) {
+    const addr = parseInt(addrStr, 10);
+    const row = allRows.find(r => r.address === addr);
+    if (row) {
+      row.raw = data.raw;
+      row.scaled = data.scaled;
+    }
+
+    const regName = row ? row.name : '';
+    const cellLive = document.getElementById(`live-val-${addr}`);
+    if (cellLive) {
+      const newStr = fmtVal(data.scaled, regName);
+      if (cellLive.textContent !== newStr) {
+        cellLive.textContent = newStr;
+        cellLive.classList.remove('updated');
+        void cellLive.offsetWidth;
+        cellLive.classList.add('updated');
+      }
+    }
+
+    const cellRaw = document.getElementById(`raw-val-${addr}`);
+    if (cellRaw) {
+      cellRaw.textContent = fmtVal(data.raw, regName);
+    }
+  }
+}
+
+function filterTable() {
+  const q = document.getElementById('reg-search').value.toLowerCase();
+  if (!q) { renderTable(sortedRows()); return; }
+  renderTable(sortedRows().filter(r =>
+    r.name.toLowerCase().includes(q) ||
+    r.description.toLowerCase().includes(q) ||
+    String(r.address).includes(q) ||
+    r.unit.toLowerCase().includes(q)
+  ));
+}
+
+function sortedRows() {
+  return [...allRows].sort((a, b) => {
+    const keys = ['address','name','description','unit','type','factor','role','raw','scaled'];
+    const key = keys[sortCol];
+    const va = a[key], vb = b[key];
+    if (va === vb) return 0;
+    if (va === null || va === undefined) return 1;
+    if (vb === null || vb === undefined) return -1;
+    return (va > vb ? 1 : -1) * sortDir;
+  });
+}
+
+function sortTable(col) {
+  if (sortCol === col) sortDir *= -1; else { sortCol = col; sortDir = 1; }
+  document.querySelectorAll('thead th').forEach((th, i) => {
+    th.classList.toggle('sort-asc',  i === col && sortDir === 1);
+    th.classList.toggle('sort-desc', i === col && sortDir === -1);
+  });
+  filterTable();
+}
+
+// ═══════════════════════════════════════════════════════
+//  WebSocket
+// ═══════════════════════════════════════════════════════
+
+let ws, reconnectTimer;
+
+function setStatus(ok) {
+  document.getElementById('status-dot').className = ok ? 'connected' : '';
+  document.getElementById('status-text').textContent = ok ? 'Verbunden' : 'Getrennt – reconnect…';
+}
+
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws`);
+
+  ws.onopen = () => {
+    setStatus(true);
+    clearTimeout(reconnectTimer);
+    ws.send(JSON.stringify({ type: 'view_tab', tab: currentTab }));
+  };
+
+  ws.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+    if (msg.type === 'history')             loadHistory(msg.data);
+    else if (msg.type === 'update')         { updateKPIs(msg.data); appendPoint(msg.data); }
+    else if (msg.type === 'registers_live') updateLiveRegisters(msg.values, msg.timestamp);
+  };
+
+  ws.onclose = () => { setStatus(false); reconnectTimer = setTimeout(connect, 3000); };
+  ws.onerror = () => ws.close();
+}
+
+connect();
+</script>
+</body>
+</html>
